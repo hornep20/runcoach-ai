@@ -1,0 +1,15 @@
+-- AlterTable
+ALTER TABLE "ExternalActivity" ADD COLUMN     "avgCadence" DOUBLE PRECISION,
+ADD COLUMN     "calories" DOUBLE PRECISION,
+ADD COLUMN     "elapsedSeconds" INTEGER,
+ADD COLUMN     "icuAverageWatts" DOUBLE PRECISION,
+ADD COLUMN     "icuFtp" DOUBLE PRECISION,
+ADD COLUMN     "icuIntensity" DOUBLE PRECISION,
+ADD COLUMN     "icuTrainingLoad" DOUBLE PRECISION,
+ADD COLUMN     "icuWeightedAvgWatts" DOUBLE PRECISION,
+ADD COLUMN     "maxCadence" DOUBLE PRECISION,
+ADD COLUMN     "maxSpeed" DOUBLE PRECISION,
+ADD COLUMN     "paceSecPerKm" DOUBLE PRECISION,
+ADD COLUMN     "source" TEXT,
+ADD COLUMN     "trainer" BOOLEAN,
+ADD COLUMN     "zoneTimes" JSONB;

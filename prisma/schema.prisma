@@ -1,0 +1,173 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum PlanType {
+  BASE_BUILDING
+  MARATHON_16_WEEK
+}
+
+enum WorkoutType {
+  EASY_RUN
+  LONG_RUN
+  TEMPO
+  INTERVAL
+  RECOVERY
+  STRENGTH
+  MOBILITY
+  REST
+}
+
+model Athlete {
+  id                String             @id @default(cuid())
+  name              String
+  email             String             @unique
+  /// Free-text goals the coach uses (e.g. blending two plans); updated from /coach when sent.
+  coachingBrief     String?            @db.Text
+  /// Persisted coach preference for base-plan generation length (weeks).
+  defaultBaseWeeks  Int                @default(8)
+  /// Persisted coach preference for base-plan distance unit (`mi` or `km`).
+  defaultDistanceUnit String           @default("mi")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  plans             TrainingPlan[]
+  externalActivities ExternalActivity[]
+  coachUploads      CoachUploadedDocument[]
+  coachConversations CoachConversation[]
+}
+
+/// User-uploaded PDF (extracted text chunked into `CoachKnowledgeChunk`).
+model CoachUploadedDocument {
+  id               String   @id @default(cuid())
+  athleteId        String
+  originalFilename String
+  createdAt        DateTime @default(now())
+  athlete          Athlete  @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+  chunks           CoachKnowledgeChunk[]
+
+  @@index([athleteId])
+}
+
+model CoachConversation {
+  id        String       @id @default(cuid())
+  athleteId String
+  title     String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  athlete   Athlete      @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+  messages  CoachMessage[]
+
+  @@index([athleteId, updatedAt])
+}
+
+model CoachMessage {
+  id             String            @id @default(cuid())
+  conversationId String
+  role           String
+  content        String            @db.Text
+  createdAt      DateTime          @default(now())
+  conversation   CoachConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+/// Text chunks + embeddings for AI coach RAG (see `npm run seed:coach-knowledge`).
+/// Stored as `float8[]` for portability; you can move to pgvector later for large corpora.
+model CoachKnowledgeChunk {
+  id         String   @id @default(cuid())
+  content    String   @db.Text
+  sourcePath String
+  embedding  Float[] @default([])
+  createdAt  DateTime @default(now())
+  uploadId   String?
+  upload     CoachUploadedDocument? @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@index([sourcePath])
+  @@index([uploadId])
+}
+
+model TrainingPlan {
+  id        String      @id @default(cuid())
+  athleteId String
+  name      String
+  type      PlanType
+  startDate DateTime
+  endDate   DateTime
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  athlete   Athlete     @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+  workouts  Workout[]
+
+  @@index([athleteId, startDate])
+}
+
+model Workout {
+  id            String      @id @default(cuid())
+  trainingPlanId String
+  date          DateTime
+  title         String
+  type          WorkoutType
+  description   String?
+  distanceKm    Float?
+  durationMin   Int?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  trainingPlan  TrainingPlan @relation(fields: [trainingPlanId], references: [id], onDelete: Cascade)
+
+  @@index([trainingPlanId, date])
+}
+
+/// Completed activities synced from external providers (e.g. Intervals.icu / COROS pipeline).
+model ExternalActivity {
+  id              String   @id @default(cuid())
+  athleteId       String
+  provider        String
+  externalId      String
+  startTime       DateTime
+  title           String
+  sportType       String?
+  /// Moving time (Intervals `moving_time`), seconds
+  durationSeconds Int?
+  /// Elapsed time (Intervals `elapsed_time`), seconds
+  elapsedSeconds  Int?
+  distanceM       Float?
+  elevationGainM  Float?
+  avgHr           Int?
+  maxHr           Int?
+  /// Average speed (Intervals `average_speed`), m/s when present
+  avgSpeed        Float?
+  maxSpeed        Float?
+  avgCadence      Float?
+  maxCadence      Float?
+  calories        Float?
+  icuTrainingLoad Float?
+  icuIntensity    Float?
+  icuFtp           Float?
+  icuWeightedAvgWatts Float?
+  icuAverageWatts  Float?
+  /// Moving time / (distanceKm); seconds per km — for pace display
+  paceSecPerKm    Float?
+  source          String?
+  trainer         Boolean?
+  /// Intervals `icu_zone_times` when returned by API
+  zoneTimes       Json?
+  /// Original row from `GET .../activities` list sync
+  rawPayload      Json
+  /// Full document from `GET /api/v1/activity/{id}` (phase-2 detail sync)
+  detailPayload   Json?
+  detailFetchedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  athlete Athlete @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+
+  @@unique([athleteId, provider, externalId])
+  @@index([athleteId, startTime])
+  @@index([athleteId, detailFetchedAt])
+}
