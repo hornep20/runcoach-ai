@@ -7,6 +7,7 @@ import { retrieveCoachChunks } from "@/lib/coach/retrieve";
 import { getOpenAIApiKey } from "@/lib/env";
 import { resolveAthleteIdForRead } from "@/lib/athleteRead";
 import { prisma } from "@/lib/prisma";
+import { buildCoachAgentDirective } from "@/lib/coach/agentRouter";
 
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
@@ -51,80 +52,6 @@ function parseMessages(body: unknown): { role: "user" | "assistant"; content: st
   return out;
 }
 
-function parseTrainingPlanId(body: unknown): string | null {
-  if (!body || typeof body !== "object") {
-    return null;
-  }
-  const v = (body as { trainingPlanId?: unknown }).trainingPlanId;
-  if (v === null || v === undefined || v === "") {
-    return null;
-  }
-  if (typeof v !== "string" || v.length > 80) {
-    return null;
-  }
-  return v.trim();
-}
-
-function parseConversationId(body: unknown): string | null {
-  if (!body || typeof body !== "object") {
-    return null;
-  }
-  const v = (body as { conversationId?: unknown }).conversationId;
-  if (v === null || v === undefined || v === "") {
-    return null;
-  }
-  if (typeof v !== "string" || v.length > 80) {
-    return null;
-  }
-  return v.trim();
-}
-
-function parseDefaultBaseWeeks(body: unknown, fallback: number): number {
-  if (!body || typeof body !== "object") {
-    return fallback;
-  }
-  const v = (body as { defaultBaseWeeks?: unknown }).defaultBaseWeeks;
-  if (typeof v !== "number" || !Number.isFinite(v)) {
-    return fallback;
-  }
-  const n = Math.round(v);
-  return Math.min(20, Math.max(4, n));
-}
-
-function parseDefaultDistanceUnit(body: unknown, fallback: "mi" | "km"): "mi" | "km" {
-  if (!body || typeof body !== "object") {
-    return fallback;
-  }
-  const v = (body as { defaultDistanceUnit?: unknown }).defaultDistanceUnit;
-  if (typeof v !== "string") {
-    return fallback;
-  }
-  const s = v.trim().toLowerCase();
-  return s === "km" ? "km" : "mi";
-}
-
-type BriefParse = { kind: "omit" } | { kind: "invalid" } | { kind: "set"; value: string };
-
-function parseCoachingBrief(body: unknown): BriefParse {
-  if (!body || typeof body !== "object") {
-    return { kind: "omit" };
-  }
-  if (!("coachingBrief" in body)) {
-    return { kind: "omit" };
-  }
-  const v = (body as { coachingBrief?: unknown }).coachingBrief;
-  if (v === null || v === undefined) {
-    return { kind: "set", value: "" };
-  }
-  if (typeof v !== "string") {
-    return { kind: "invalid" };
-  }
-  if (v.length > MAX_BRIEF_LEN) {
-    return { kind: "invalid" };
-  }
-  return { kind: "set", value: v };
-}
-
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     getOpenAIApiKey();
@@ -147,7 +74,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json(
       {
         error:
-          "Expected { messages: { role: 'user'|'assistant', content: string }[], trainingPlanId?: string, coachingBrief?: string }.",
+          "Expected { messages: { role: 'user'|'assistant', content: string }[] }.",
       },
       { status: 400 },
     );
@@ -161,123 +88,42 @@ export async function POST(request: Request): Promise<NextResponse> {
   const athleteId = await resolveAthleteIdForRead();
   if (!athleteId) {
     return NextResponse.json(
-      { error: "No athlete configured. Set RUNCOACH_DEFAULT_ATHLETE_ID or create an Athlete." },
+      { error: "No athlete configured." },
       { status: 400 },
     );
-  }
-
-  const trainingPlanId = parseTrainingPlanId(body);
-  if (trainingPlanId) {
-    const ok = await prisma.trainingPlan.findFirst({
-      where: { id: trainingPlanId, athleteId },
-      select: { id: true },
-    });
-    if (!ok) {
-      return NextResponse.json({ error: "Invalid trainingPlanId for this athlete" }, { status: 400 });
-    }
-  }
-
-  const briefParsed = parseCoachingBrief(body);
-  if (briefParsed.kind === "invalid") {
-    return NextResponse.json({ error: "Invalid coachingBrief" }, { status: 400 });
-  }
-  if (briefParsed.kind === "set") {
-    await prisma.athlete.update({
-      where: { id: athleteId },
-      data: { coachingBrief: briefParsed.value.length > 0 ? briefParsed.value : null },
-    });
-  }
-
-  const athletePrefs = await prisma.athlete.findUnique({
-    where: { id: athleteId },
-    select: {
-      coachingBrief: true,
-      defaultBaseWeeks: true,
-      defaultDistanceUnit: true,
-    },
-  });
-
-  const coachingBriefForContext =
-    briefParsed.kind === "set"
-      ? briefParsed.value
-      : athletePrefs?.coachingBrief ?? "";
-
-  const incomingConversationId = parseConversationId(body);
-  const defaultBaseWeeks = parseDefaultBaseWeeks(
-    body,
-    athletePrefs?.defaultBaseWeeks ?? DEFAULT_BASE_WEEKS,
-  );
-  const defaultDistanceUnit = parseDefaultDistanceUnit(
-    body,
-    athletePrefs?.defaultDistanceUnit === "km" ? "km" : "mi",
-  );
-  let conversationId: string;
-  if (incomingConversationId) {
-    const conversation = await prisma.coachConversation.findFirst({
-      where: { id: incomingConversationId, athleteId },
-      select: { id: true },
-    });
-    if (!conversation) {
-      return NextResponse.json({ error: "Invalid conversationId for this athlete" }, { status: 400 });
-    }
-    conversationId = conversation.id;
-  } else {
-    const title = lastUser.content.slice(0, MAX_TITLE_LEN).trim();
-    const created = await prisma.coachConversation.create({
-      data: {
-        athleteId,
-        title: title.length > 0 ? title : "Coach chat",
-      },
-      select: { id: true },
-    });
-    conversationId = created.id;
   }
 
   try {
     const queryEmbedding = await embedText(lastUser.content);
     const chunks = await retrieveCoachChunks(queryEmbedding);
+
     const athleteBlock = await buildFullCoachContextBlock({
-      trainingPlanId,
-      coachingBrief: coachingBriefForContext,
-      defaultBaseWeeks,
-      defaultDistanceUnit,
+      trainingPlanId: null,
+      coachingBrief: null,
+      defaultBaseWeeks: DEFAULT_BASE_WEEKS,
+      defaultDistanceUnit: "mi",
     });
-    const systemContent = buildCoachSystemPrompt(chunks, athleteBlock);
+
+    const agentDirective = await buildCoachAgentDirective(lastUser.content);
+
+    const systemContent = buildCoachSystemPrompt(
+      chunks,
+      `${agentDirective}\n\n${athleteBlock}`,
+    );
 
     const fullMessages: ChatCompletionMessageParam[] = [
       { role: "system", content: systemContent },
       ...messages.map((m) => ({ role: m.role, content: m.content })),
     ];
 
-    const { reply, workoutsCreated, basePlansCreated } = await chatCoachWithTools(fullMessages, {
-      trainingPlanId,
+    const { reply } = await chatCoachWithTools(fullMessages, {
+      trainingPlanId: null,
       athleteId,
-      defaultBaseWeeks,
-      defaultDistanceUnit,
+      defaultBaseWeeks: DEFAULT_BASE_WEEKS,
+      defaultDistanceUnit: "mi",
     });
 
-    await prisma.$transaction([
-      prisma.coachMessage.create({
-        data: {
-          conversationId,
-          role: "user",
-          content: lastUser.content,
-        },
-      }),
-      prisma.coachMessage.create({
-        data: {
-          conversationId,
-          role: "assistant",
-          content: reply,
-        },
-      }),
-      prisma.coachConversation.update({
-        where: { id: conversationId },
-        data: { updatedAt: new Date() },
-      }),
-    ]);
-
-    return NextResponse.json({ reply, workoutsCreated, basePlansCreated, conversationId });
+    return NextResponse.json({ reply });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Coach request failed";
     return NextResponse.json({ error: message }, { status: 500 });
