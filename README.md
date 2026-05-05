@@ -1,86 +1,205 @@
 # RunCoach AI
 
-Marathon coaching web app (Next.js + TypeScript + Prisma + PostgreSQL). See [docs/project-brief.md](docs/project-brief.md) for product scope.
+RunCoach AI is a full-stack running analytics and coaching platform that transforms raw training data into explainable fatigue, readiness, and coaching insights.
 
-## Setup
+Built with Next.js, TypeScript, Prisma, and PostgreSQL.
 
-1. Copy [`.env.example`](.env.example) to `.env` and fill in values.
-2. Install dependencies: `npm install`
-3. Apply database schema: `npx prisma migrate dev`
-4. Run the app: `npm run dev`
+---
 
-## Intervals.icu sync (COROS and other sources)
+## 🚀 Features
 
-COROS data typically flows into Intervals.icu first. RunCoach imports **completed activities** from the Intervals API into `ExternalActivity` rows.
+### 📊 Training Dashboard
+- 28-day training summary (mileage, pace, load, frequency)
+- Weekly mileage trends
+- Rolling 28-day training load
+- Long run progression tracking
+- Recent runs table (distance, pace, HR, load)
 
-1. Create an **Athlete** in the database (e.g. Prisma Studio) or set `RUNCOACH_DEFAULT_ATHLETE_ID` to an existing Athlete `id`.
-2. In Intervals.icu → **Settings** → **Developer Settings**, create an **API key**.
-3. Set in `.env`:
-   - `INTERVALS_ICU_API_KEY`
-   - `SYNC_SECRET_TOKEN` (any long random string you choose)
-   - Optional: `INTERVALS_ICU_ATHLETE_ID` (default `0` = athlete for that API key)
+---
 
-Trigger a full backfill (can take a while):
+### 🧠 Fatigue & Readiness Modeling
+- Explainable fatigue score (1–10)
+- Readiness score derived from fatigue
+- Fatigue modeled as:
+  - Base training stress from rolling load
+  - Adjustments from spikes (mileage, long runs, frequency)
+- Transparent scoring with factor breakdowns
+
+---
+
+### 📈 Historical Trend Tracking
+- Daily persisted fatigue and readiness snapshots
+- Time-series trend chart
+- Hover insights (distance, load, run count, time)
+- True historical tracking (not derived estimates)
+
+---
+
+### 💡 Training Insights Engine
+- Deterministic rule-based coaching insights
+- Detects:
+  - Fatigue trends (rising / falling)
+  - Readiness changes
+  - Mileage spikes
+  - Load increases
+  - Long run progression risks
+- Outputs structured:
+  - title
+  - evidence
+  - recommendation
+
+---
+
+### 🤖 AI Coach (RAG)
+- Chat-based coaching assistant
+- Uses:
+  - athlete training data
+  - recent runs + stats
+  - uploaded PDFs (training plans)
+  - indexed docs from `/docs`
+- Retrieval-Augmented Generation (RAG) system
+- Structured prompts + tool calling
+
+---
+
+### 🔄 Data Pipeline
+- Syncs activities from Intervals.icu (COROS-compatible)
+- Stores activities in PostgreSQL
+- Supports:
+  - full backfill
+  - detailed activity fetch
+- Enables time-series analytics and feature engineering
+
+---
+
+## 🧱 Architecture Overview
+
+```
+Intervals API → ExternalActivity (DB)
+               ↓
+        Feature Engineering
+               ↓
+   Fatigue / Readiness Model
+               ↓
+ TrainingStatusSnapshot (time-series)
+               ↓
+ Dashboard + Insights + AI Coach
+```
+
+---
+
+## 🛠️ Setup
+
+1. Copy environment file:
 
 ```bash
-curl -X POST http://localhost:3000/api/sync/intervals ^
-  -H "Content-Type: application/json" ^
-  -H "X-Sync-Secret: YOUR_SYNC_SECRET_TOKEN" ^
-  -d "{}"
+cp .env.example .env
 ```
 
-Optional body to target a specific DB athlete:
-
-```json
-{ "athleteId": "clxxxxxxxx" }
-```
-
-### Phase 2: full activity documents
-
-After the list backfill, you can fetch **`GET /api/v1/activity/{id}`** for each stored row to refresh scalar fields from the richer payload and save the full JSON in `detailPayload` (the list response stays in `rawPayload`). This is slow (one HTTP call per activity, with a short delay between requests).
+2. Install dependencies:
 
 ```bash
-curl -X POST http://localhost:3000/api/sync/intervals/details ^
-  -H "Content-Type: application/json" ^
-  -H "X-Sync-Secret: YOUR_SYNC_SECRET_TOKEN" ^
-  -d "{}"
+npm install
 ```
 
-Optional JSON body:
+3. Run database migrations:
 
-- `athleteId` — same as list sync
-- `limit` — max activities to process this run (default 5000, hard cap 20000)
-- `force` — when `true`, re-fetch even if `detailFetchedAt` is already set
-- `includeIntervals` — when `false`, omit `?intervals=true` for a smaller response
+```bash
+npx prisma migrate dev
+npx prisma generate
+```
 
-Then open **Calendar** and **Dashboard** to see imported runs.
+4. Start the app:
 
-## AI coach (RAG)
+```bash
+npm run dev
+```
 
-1. Set **`OPENAI_API_KEY`** in `.env` (see [`.env.example`](.env.example)).
-2. Apply migrations (`npx prisma migrate dev`) so **`CoachKnowledgeChunk`**, **`CoachUploadedDocument`**, and **`Athlete.coachingBrief`** exist.
-3. Index markdown under **`docs/`** (embeddings stored as PostgreSQL **`double precision[]`** — no `pgvector` required for typical sizes):
+---
+
+## 🔄 Intervals.icu Sync
+
+1. Create an athlete in DB or set:
+
+```
+RUNCOACH_DEFAULT_ATHLETE_ID
+```
+
+2. Add to `.env`:
+
+```
+INTERVALS_ICU_API_KEY
+SYNC_SECRET_TOKEN
+```
+
+3. Run sync:
+
+```bash
+curl -X POST http://localhost:3000/api/sync/intervals \
+  -H "Content-Type: application/json" \
+  -H "X-Sync-Secret: YOUR_SYNC_SECRET_TOKEN"
+```
+
+---
+
+## 🤖 AI Coach Setup
+
+1. Add API key:
+
+```
+OPENAI_API_KEY=...
+```
+
+2. Index knowledge base:
 
 ```bash
 npm run seed:coach-knowledge
 ```
 
-4. Open **`/coach`**:
-   - **Plan strategy** — textarea saved to the athlete row when you send a message (e.g. blending an 8–10 week base block with a 16-week marathon plan).
-   - **PDF** — upload a text-based plan PDF; it is chunked, embedded, and searchable like `docs/`.
-   - **Calendar target** — choose a **`TrainingPlan`**; the coach can call **`create_planned_workouts`** to insert **`Workout`** rows on that plan when you ask (e.g. “add next week’s easy runs”).
-5. **`POST /api/coach/chat`** — RAG on your latest user message plus a richer snapshot: last 28-day imported-run stats, recent activities, upcoming planned workouts for the selected plan, and your coaching brief.
+3. Open:
 
-Optional: **`OPENAI_CHAT_MODEL`** (default `gpt-4o-mini`).
+```
+/coach
+```
 
-**`GET /api/training-plans`** — JSON list of plans for the resolved athlete (for scripts or future UI).
+---
 
-## Scripts
+## 📦 Key Models
 
-- `npm run verify:intervals-map` — validates activity JSON mapping against the checked-in fixture (no network).
-- `npm run seed:coach-knowledge` — chunks `docs/**/*.md`, embeds via OpenAI, fills `CoachKnowledgeChunk` (requires `OPENAI_API_KEY` and network).
+- `ExternalActivity` → raw training data
+- `TrainingStatusSnapshot` → daily fatigue/readiness
+- `CoachKnowledgeChunk` → RAG embeddings
+- `Athlete` → user context
 
-## Learn more
+---
 
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Intervals.icu API](https://intervals.icu/api-docs.html)
+## 🎯 What This Project Demonstrates
+
+This project showcases:
+
+- Full-stack application development (Next.js + TypeScript)
+- PostgreSQL data modeling with Prisma
+- External API ingestion and normalization
+- Time-series analytics and feature engineering
+- Explainable scoring systems (fatigue/readiness)
+- Persistent derived metrics (daily snapshots)
+- Deterministic insight generation
+- RAG-based AI system integration
+- Data + AI product design
+
+---
+
+## 🔮 Future Improvements
+
+- LLM polishing layer for coaching tone
+- Smoothed trend lines (moving averages)
+- Performance-based fatigue signals (pace vs HR)
+- Automated background jobs for snapshot persistence
+- Multi-athlete support + auth
+
+---
+
+## 📚 Learn More
+
+- Next.js: https://nextjs.org/docs
+- Intervals API: https://intervals.icu/api-docs.html
