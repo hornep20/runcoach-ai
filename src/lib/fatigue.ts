@@ -78,6 +78,46 @@ function readinessSummaryFromLevel(level: ReadinessLevel): string {
   }
 }
 
+function baseFatigueFromLoad(load: number): FatigueFactor {
+  if (load >= 900) {
+    return {
+      label: "High base training load",
+      points: 8,
+      detail: `Rolling 28-day load is ${load}, creating a high baseline fatigue signal.`,
+    };
+  }
+
+  if (load >= 700) {
+    return {
+      label: "Moderate-high base training load",
+      points: 6.5,
+      detail: `Rolling 28-day load is ${load}, creating a moderate-high baseline fatigue signal.`,
+    };
+  }
+
+  if (load >= 500) {
+    return {
+      label: "Moderate base training load",
+      points: 5,
+      detail: `Rolling 28-day load is ${load}.`,
+    };
+  }
+
+  if (load >= 300) {
+    return {
+      label: "Low-moderate base training load",
+      points: 3.5,
+      detail: `Rolling 28-day load is ${load}.`,
+    };
+  }
+
+  return {
+    label: "Low base training load",
+    points: 2,
+    detail: `Rolling 28-day load is ${load}.`,
+  };
+}
+
 export function calculateFatigueScore(stats: DashboardStats): FatigueScore {
   const factors: FatigueFactor[] = [];
   const weekly = stats.weeklyTrend;
@@ -86,6 +126,7 @@ export function calculateFatigueScore(stats: DashboardStats): FatigueScore {
   const currentWeek = weekly.at(-1);
   const previousWeek = weekly.at(-2);
   const currentRolling = rolling.at(-1);
+  const currentLoad = currentRolling?.trainingLoad ?? 0;
   const twoWeeksAgoRolling = rolling.at(-15);
   const currentLongRun = longRuns.at(-1);
   const previousLongRun = longRuns.at(-2);
@@ -105,25 +146,30 @@ export function calculateFatigueScore(stats: DashboardStats): FatigueScore {
     };
   }
 
+  // Fatigue is modeled as baseline training stress from rolling load,
+  // then adjusted for recent spikes, long-run jumps, and frequency.
+  const baseFactor = baseFatigueFromLoad(currentLoad);
+  factors.push(baseFactor);
+
   if (currentWeek && previousWeek) {
     const change = pctChange(currentWeek.distanceMi, previousWeek.distanceMi);
     if (change != null) {
       if (change >= 40) {
         factors.push({
           label: "Weekly mileage spike",
-          points: 2.5,
+          points: 1.5,
           detail: `Current week mileage is up ${change.toFixed(0)}% vs last week.`,
         });
       } else if (change >= 25) {
         factors.push({
           label: "Weekly mileage jump",
-          points: 1.75,
+          points: 1,
           detail: `Current week mileage is up ${change.toFixed(0)}% vs last week.`,
         });
       } else if (change <= -35) {
         factors.push({
           label: "Recent training drop",
-          points: 0.75,
+          points: 0.5,
           detail: `Current week mileage is down ${Math.abs(change).toFixed(0)}% vs last week. Re-entry should be controlled.`,
         });
       }
@@ -136,30 +182,16 @@ export function calculateFatigueScore(stats: DashboardStats): FatigueScore {
       if (loadChange >= 35) {
         factors.push({
           label: "Rolling load spike",
-          points: 2.5,
+          points: 1.5,
           detail: `Rolling 28-day load is up ${loadChange.toFixed(0)}% over roughly two weeks.`,
         });
       } else if (loadChange >= 20) {
         factors.push({
           label: "Rolling load increase",
-          points: 1.5,
+          points: 1,
           detail: `Rolling 28-day load is up ${loadChange.toFixed(0)}% over roughly two weeks.`,
         });
       }
-    }
-
-    if (currentRolling.trainingLoad >= 900) {
-      factors.push({
-        label: "High absolute load",
-        points: 2,
-        detail: `Current rolling load is ${currentRolling.trainingLoad}, which is a high workload signal.`,
-      });
-    } else if (currentRolling.trainingLoad >= 600) {
-      factors.push({
-        label: "Moderate-high absolute load",
-        points: 1,
-        detail: `Current rolling load is ${currentRolling.trainingLoad}.`,
-      });
     }
   }
 
@@ -168,13 +200,13 @@ export function calculateFatigueScore(stats: DashboardStats): FatigueScore {
     if (jump >= 4) {
       factors.push({
         label: "Long-run jump",
-        points: 2,
+        points: 1.25,
         detail: `Long run increased by ${jump.toFixed(1)} miles vs previous week.`,
       });
     } else if (jump >= 2.5) {
       factors.push({
         label: "Long-run progression stress",
-        points: 1,
+        points: 0.75,
         detail: `Long run increased by ${jump.toFixed(1)} miles vs previous week.`,
       });
     }
@@ -184,22 +216,14 @@ export function calculateFatigueScore(stats: DashboardStats): FatigueScore {
   if (recentRunCount >= 24) {
     factors.push({
       label: "High run frequency",
-      points: 1.5,
+      points: 1,
       detail: `${recentRunCount} runs imported in the last 28 days.`,
     });
   } else if (recentRunCount >= 18) {
     factors.push({
       label: "Consistent run frequency",
-      points: 0.75,
+      points: 0.5,
       detail: `${recentRunCount} runs imported in the last 28 days.`,
-    });
-  }
-
-  if (factors.length === 0) {
-    factors.push({
-      label: "No major fatigue drivers detected",
-      points: 1,
-      detail: "Mileage, load, long-run progression, and run frequency do not show a major spike from available data.",
     });
   }
 

@@ -1,6 +1,7 @@
 import { formatMiles } from "@/lib/distance";
 import { getDashboardStats } from "@/lib/dashboard";
 import { calculateTrainingStatusScore } from "@/lib/fatigue";
+import { generateTrainingInsights } from "@/lib/trainingInsights";
 import {
   backfillTrainingStatusHistory,
   getDailyRunHoverStats,
@@ -8,6 +9,7 @@ import {
   persistTrainingStatus,
 } from "@/lib/trainingStatus";
 import { RecentRuns } from "./recent-runs";
+import { TrainingInsights } from "./training-insights";
 import { TrainingTrendsCharts } from "./training-trends-charts";
 import { TrainingStatusTrendCharts } from "./training-status-trend-charts";
 
@@ -50,6 +52,7 @@ export default async function DashboardPage() {
       ? await getDailyRunHoverStats(firstDate, lastDate)
       : {};
   const trainingStatus = calculateTrainingStatusScore(stats);
+  const insights = generateTrainingInsights(trend, stats);
 
   return (
     <div className="space-y-6">
@@ -84,6 +87,13 @@ export default async function DashboardPage() {
             value={`${trainingStatus.readiness.score.toFixed(1)} / 10`}
           />
         </div>
+      </Panel>
+
+      <Panel
+        title="AI Training Insights"
+        description="Plain-English coaching takeaways from your fatigue, readiness, mileage, and load trends."
+      >
+        <TrainingInsights insights={insights} />
       </Panel>
 
       <Panel
