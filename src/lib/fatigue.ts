@@ -1,6 +1,7 @@
 import type { DashboardStats } from "@/lib/dashboard";
 
 export type FatigueLevel = "low" | "moderate" | "elevated" | "high";
+export type ReadinessLevel = "low" | "moderate" | "good" | "high";
 
 export interface FatigueFactor {
   label: string;
@@ -13,6 +14,17 @@ export interface FatigueScore {
   level: FatigueLevel;
   summary: string;
   factors: FatigueFactor[];
+}
+
+export interface ReadinessScore {
+  score: number;
+  level: ReadinessLevel;
+  summary: string;
+}
+
+export interface TrainingStatusScore {
+  fatigue: FatigueScore;
+  readiness: ReadinessScore;
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -33,6 +45,13 @@ function levelFromScore(score: number): FatigueLevel {
   return "low";
 }
 
+function readinessLevelFromScore(score: number): ReadinessLevel {
+  if (score >= 8) return "high";
+  if (score >= 6) return "good";
+  if (score >= 4) return "moderate";
+  return "low";
+}
+
 function summaryFromLevel(level: FatigueLevel): string {
   switch (level) {
     case "high":
@@ -43,6 +62,19 @@ function summaryFromLevel(level: FatigueLevel): string {
       return "Moderate fatigue. Training appears manageable, but keep the next workout honest and repeatable.";
     case "low":
       return "Low fatigue signal from available data. Normal training progression looks reasonable if you feel good.";
+  }
+}
+
+function readinessSummaryFromLevel(level: ReadinessLevel): string {
+  switch (level) {
+    case "high":
+      return "High readiness. The data supports normal progression if subjective feel is good.";
+    case "good":
+      return "Good readiness. Training can continue, but avoid unnecessary spikes.";
+    case "moderate":
+      return "Moderate readiness. Keep the next session controlled and prioritize consistency.";
+    case "low":
+      return "Low readiness. Recovery or reduced intensity should be prioritized.";
   }
 }
 
@@ -180,5 +212,23 @@ export function calculateFatigueScore(stats: DashboardStats): FatigueScore {
     level,
     summary: summaryFromLevel(level),
     factors,
+  };
+}
+
+export function calculateReadinessScore(fatigue: FatigueScore): ReadinessScore {
+  const score = Math.round(clamp(11 - fatigue.score, 1, 10) * 10) / 10;
+  const level = readinessLevelFromScore(score);
+  return {
+    score,
+    level,
+    summary: readinessSummaryFromLevel(level),
+  };
+}
+
+export function calculateTrainingStatusScore(stats: DashboardStats): TrainingStatusScore {
+  const fatigue = calculateFatigueScore(stats);
+  return {
+    fatigue,
+    readiness: calculateReadinessScore(fatigue),
   };
 }
