@@ -63,15 +63,19 @@ function LineScoreChart({
       <div className="relative h-60 w-full">
         <svg viewBox={`0 0 ${dims.W} ${dims.H}`} className="h-full w-full">
           {[2, 4, 6, 8, 10].map((t) => (
-            <line
-              key={t}
-              x1={dims.left}
-              x2={dims.W - dims.right}
-              y1={dims.y(t)}
-              y2={dims.y(t)}
-              stroke="#e4e4e7"
-              strokeWidth="1"
-            />
+            <g key={t}>
+              <line
+                x1={dims.left}
+                x2={dims.W - dims.right}
+                y1={dims.y(t)}
+                y2={dims.y(t)}
+                stroke="#e4e4e7"
+                strokeWidth="1"
+              />
+              <text x={dims.left + 2} y={dims.y(t) - 3} fontSize="10" fill="#71717a">
+                {t}
+              </text>
+            </g>
           ))}
           <polyline
             fill="none"

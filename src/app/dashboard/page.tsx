@@ -7,6 +7,8 @@ import {
   getTrainingStatusTrend,
   persistTrainingStatus,
 } from "@/lib/trainingStatus";
+import { RecentRuns } from "./recent-runs";
+import { TrainingTrendsCharts } from "./training-trends-charts";
 import { TrainingStatusTrendCharts } from "./training-status-trend-charts";
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -89,6 +91,21 @@ export default async function DashboardPage() {
         description="Historical daily status values."
       >
         <TrainingStatusTrendCharts data={trend} runStatsByDate={runStatsByDate} />
+      </Panel>
+
+      <Panel
+        title="Training trends"
+        description="Weekly mileage, rolling 28-day load, and long-run progression."
+      >
+        <TrainingTrendsCharts
+          weeklyTrend={stats.weeklyTrend}
+          rolling28Trend={stats.rolling28Trend}
+          longRunProgression={stats.longRunProgression}
+        />
+      </Panel>
+
+      <Panel title="Recent runs" description="Most recent imported runs and key metrics.">
+        <RecentRuns runs={stats.recentRuns} />
       </Panel>
     </div>
   );
