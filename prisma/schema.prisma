@@ -39,6 +39,26 @@ model Athlete {
   externalActivities ExternalActivity[]
   coachUploads      CoachUploadedDocument[]
   coachConversations CoachConversation[]
+  trainingStatusSnapshots TrainingStatusSnapshot[]
+}
+
+/// Persisted daily fatigue/readiness snapshots for true historical trend charts.
+model TrainingStatusSnapshot {
+  id             String   @id @default(cuid())
+  athleteId      String
+  date           DateTime
+  fatigueScore   Float
+  fatigueLevel   String
+  readinessScore Float
+  readinessLevel String
+  summary        String?  @db.Text
+  factors        Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  athlete        Athlete  @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+
+  @@unique([athleteId, date])
+  @@index([athleteId, date])
 }
 
 /// User-uploaded PDF (extracted text chunked into `CoachKnowledgeChunk`).
