@@ -266,13 +266,16 @@ function modeInstructions(mode: CoachAgentMode): string[] {
       return [
         "Build from current fitness, not idealized goal mileage.",
         "Use conservative progression unless the athlete explicitly asks for aggressive training and the data supports it.",
+        "Include a clear week structure: key run types, long-run progression, and where cutback weeks occur.",
+        "Favor mostly easy running with limited intensity; avoid stacking hard sessions close together.",
+        "State assumptions explicitly when key inputs are missing (goal race date, availability, injury constraints, preferred long-run day).",
         "If the athlete clearly asks to create a plan, use the plan creation tool. Otherwise describe the structure first.",
       ];
     case "plan_adjustment":
       return [
         "Prioritize preserving the long run and total weekly consistency.",
         "Do not stack hard sessions to make up missed work.",
-        "If a selected plan id exists and the user asks to change calendar workouts, use the workout creation tool carefully.",
+        "If the user asks to change calendar workouts, use the workout creation tool carefully with small batches.",
       ];
     case "recovery_risk":
       return [

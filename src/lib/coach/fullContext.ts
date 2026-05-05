@@ -6,7 +6,77 @@ import { calculateFatigueScore } from "@/lib/fatigue";
 
 import { getAthleteCoachingContext } from "@/lib/coach/athleteContext";
 
-// (same helper functions unchanged above)
+function formatUpcoming(
+  rows: {
+    date: Date;
+    title: string;
+    type: string;
+    distanceKm: number | null;
+    durationMin: number | null;
+  }[],
+): string {
+  if (rows.length === 0) {
+    return "No upcoming planned workouts in this window.";
+  }
+  return rows
+    .map((w) => {
+      const d = w.date.toISOString().slice(0, 10);
+      const dist =
+        w.distanceKm != null ? `${Math.round(w.distanceKm * 10) / 10} km planned` : "—";
+      const dur = w.durationMin != null ? `${w.durationMin} min` : "—";
+      return `- ${d} · ${w.type} · ${w.title} · ${dist} · ${dur}`;
+    })
+    .join("\n");
+}
+
+function formatWeeklyDashboardSignals(
+  weekly: { label: string; runCount: number; distanceMi: number; trainingLoad: number }[],
+): string {
+  if (weekly.length < 2) return "Weekly trend: not enough data.";
+  const current = weekly[weekly.length - 1];
+  const prev = weekly[weekly.length - 2];
+  const distanceDelta = current.distanceMi - prev.distanceMi;
+  const loadDelta = current.trainingLoad - prev.trainingLoad;
+  return `Weekly trend (${prev.label} -> ${current.label}): runs ${prev.runCount} -> ${current.runCount}, distance ${prev.distanceMi.toFixed(1)} -> ${current.distanceMi.toFixed(1)} mi (${distanceDelta >= 0 ? "+" : ""}${distanceDelta.toFixed(1)}), load ${prev.trainingLoad.toFixed(1)} -> ${current.trainingLoad.toFixed(1)} (${loadDelta >= 0 ? "+" : ""}${loadDelta.toFixed(1)}).`;
+}
+
+function formatRollingDashboardSignals(
+  rolling: { label: string; distanceMi: number; trainingLoad: number }[],
+): string {
+  if (rolling.length < 15) return "Rolling 28-day trend: not enough data.";
+  const current = rolling[rolling.length - 1];
+  const twoWeeksAgo = rolling[rolling.length - 15];
+  const distDelta = current.distanceMi - twoWeeksAgo.distanceMi;
+  const loadDelta = current.trainingLoad - twoWeeksAgo.trainingLoad;
+  return `Rolling 28-day trend (${twoWeeksAgo.label} -> ${current.label}): distance ${twoWeeksAgo.distanceMi.toFixed(1)} -> ${current.distanceMi.toFixed(1)} mi (${distDelta >= 0 ? "+" : ""}${distDelta.toFixed(1)}), load ${twoWeeksAgo.trainingLoad.toFixed(1)} -> ${current.trainingLoad.toFixed(1)} (${loadDelta >= 0 ? "+" : ""}${loadDelta.toFixed(1)}).`;
+}
+
+function formatLongRunSignals(
+  points: { label: string; distanceMi: number; title: string }[],
+): string {
+  const lastTwo = points.filter((p) => p.distanceMi > 0).slice(-2);
+  if (lastTwo.length === 0) return "Long run progression: no long runs found.";
+  if (lastTwo.length === 1) {
+    return `Latest long run (${lastTwo[0].label}): ${lastTwo[0].distanceMi.toFixed(1)} mi (${lastTwo[0].title}).`;
+  }
+  const prev = lastTwo[0];
+  const current = lastTwo[1];
+  const delta = current.distanceMi - prev.distanceMi;
+  return `Long run progression: ${prev.distanceMi.toFixed(1)} mi (${prev.label}) -> ${current.distanceMi.toFixed(1)} mi (${current.label}), delta ${delta >= 0 ? "+" : ""}${delta.toFixed(1)} mi.`;
+}
+
+function formatRecentRuns(
+  runs: { date: string; title: string; distanceMi: number; paceLabel: string; trainingLoad: string }[],
+): string {
+  if (runs.length === 0) return "Recent runs: none.";
+  const top = runs.slice(0, 5);
+  return [
+    "Most recent runs:",
+    ...top.map(
+      (r) => `- ${r.date} · ${r.title} · ${r.distanceMi.toFixed(1)} mi · ${r.paceLabel} · load ${r.trainingLoad}`,
+    ),
+  ].join("\n");
+}
 
 export async function buildFullCoachContextBlock(options: {
   trainingPlanId: string | null;

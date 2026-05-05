@@ -4,34 +4,21 @@ import { useCallback, useEffect, useState } from "react";
 
 import { CoachChat } from "./coach-chat";
 
-export interface TrainingPlanOption {
-  id: string;
-  name: string;
-  type: string;
-  startDate: string;
-  endDate: string;
-}
-
 export interface CoachTurn {
   role: "user" | "assistant";
   content: string;
 }
 
 export function CoachShell(props: {
-  plans: TrainingPlanOption[];
   initialCoachingBrief: string;
   initialDefaultBaseWeeks: number;
   initialDefaultDistanceUnit: "mi" | "km";
   initialConversationId: string | null;
   initialTurns: CoachTurn[];
 }) {
-  const [trainingPlanId, setTrainingPlanId] = useState(
-    () => props.plans[0]?.id ?? "",
-  );
   const [coachingBrief, setCoachingBrief] = useState(props.initialCoachingBrief);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [creatingPlan, setCreatingPlan] = useState(false);
   const [defaultBaseWeeks, setDefaultBaseWeeks] = useState(
     props.initialDefaultBaseWeeks,
   );
@@ -85,68 +72,9 @@ export function CoachShell(props: {
     }
   }, []);
 
-  const onCreateDraftPlan = useCallback(async () => {
-    setUploadMsg(null);
-    setCreatingPlan(true);
-    try {
-      const res = await fetch("/api/training-plans", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "Coach Draft Plan",
-          type: "MARATHON_16_WEEK",
-        }),
-      });
-      const data = (await res.json()) as { error?: string };
-      if (!res.ok) {
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      window.location.reload();
-    } catch (e) {
-      setUploadMsg(e instanceof Error ? e.message : "Could not create draft plan");
-    } finally {
-      setCreatingPlan(false);
-    }
-  }, []);
-
   return (
     <div className="mt-6 space-y-6">
-      <div className="grid gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4 sm:grid-cols-2">
-        <div className="flex flex-col gap-2">
-          <label htmlFor="coach-plan" className="text-xs font-medium text-zinc-500">
-            Calendar target (planned workouts)
-          </label>
-          <select
-            id="coach-plan"
-            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm"
-            value={trainingPlanId}
-            onChange={(e) => setTrainingPlanId(e.target.value)}
-          >
-            {props.plans.length === 0 ? (
-              <option value="">No training plans — create one in the database first</option>
-            ) : (
-              props.plans.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.type}) · {p.startDate.slice(0, 10)} → {p.endDate.slice(0, 10)}
-                </option>
-              ))
-            )}
-          </select>
-          <p className="text-xs text-zinc-500">
-            The coach can add future workouts to this plan when you ask. Pick the plan that should
-            receive new rows (e.g. your marathon block).
-          </p>
-          {props.plans.length === 0 ? (
-            <button
-              type="button"
-              disabled={creatingPlan}
-              className="mt-1 w-fit rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-              onClick={() => void onCreateDraftPlan()}
-            >
-              {creatingPlan ? "Creating..." : "Create draft plan for calendar"}
-            </button>
-          ) : null}
-        </div>
+      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
         <div className="flex flex-col gap-2">
           <label htmlFor="coach-pdf" className="text-xs font-medium text-zinc-500">
             Upload plan PDF (text extracted and embedded for RAG)
@@ -229,7 +157,6 @@ export function CoachShell(props: {
       </div>
 
       <CoachChat
-        trainingPlanId={trainingPlanId}
         coachingBrief={coachingBrief}
         defaultBaseWeeks={defaultBaseWeeks}
         defaultDistanceUnit={defaultDistanceUnit}

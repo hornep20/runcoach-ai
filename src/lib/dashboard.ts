@@ -230,8 +230,8 @@ function shortDateLabel(date: Date): string {
   }).format(date);
 }
 
-function buildWeeklyTrend(rows: RunRow[], weeks = 12): WeeklyRunTrend[] {
-  const thisWeek = startOfWeek(new Date());
+function buildWeeklyTrend(rows: RunRow[], weeks = 12, asOf = new Date()): WeeklyRunTrend[] {
+  const thisWeek = startOfWeek(asOf);
   const firstWeek = addDays(thisWeek, -7 * (weeks - 1));
   const buckets = new Map<string, WeeklyRunTrend>();
 
@@ -267,8 +267,8 @@ function buildWeeklyTrend(rows: RunRow[], weeks = 12): WeeklyRunTrend[] {
   }));
 }
 
-function buildRollingTrend(rows: RunRow[], days = 42): RollingRunTrend[] {
-  const today = new Date();
+function buildRollingTrend(rows: RunRow[], days = 42, asOf = new Date()): RollingRunTrend[] {
+  const today = new Date(asOf);
   today.setHours(0, 0, 0, 0);
   const firstDay = addDays(today, -(days - 1));
 
@@ -306,9 +306,9 @@ function buildRollingTrend(rows: RunRow[], days = 42): RollingRunTrend[] {
   return result;
 }
 
-function buildLongRunProgression(rows: RunRow[], weeks = 12): LongRunProgressionPoint[] {
+function buildLongRunProgression(rows: RunRow[], weeks = 12, asOf = new Date()): LongRunProgressionPoint[] {
   const weekly = new Map<string, LongRunProgressionPoint>();
-  const thisWeek = startOfWeek(new Date());
+  const thisWeek = startOfWeek(asOf);
   const firstWeek = addDays(thisWeek, -7 * (weeks - 1));
 
   for (let i = 0; i < weeks; i += 1) {
@@ -373,8 +373,14 @@ export interface DashboardStats {
   recentRuns: RecentRunSummary[];
 }
 
-export async function getDashboardStats(): Promise<DashboardStats> {
-  const athleteId = await resolveAthleteIdForRead();
+export async function getDashboardStatsForDate(
+  asOfInput: Date,
+  athleteIdOverride?: string | null,
+): Promise<DashboardStats> {
+  const athleteId =
+    athleteIdOverride === undefined
+      ? await resolveAthleteIdForRead()
+      : athleteIdOverride;
 
   if (!athleteId) {
     return {
@@ -388,13 +394,15 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     };
   }
 
-  const fourWeeksAgo = new Date();
+  const asOf = new Date(asOfInput);
+  asOf.setHours(23, 59, 59, 999);
+  const asOfExclusive = new Date(asOf);
+  asOfExclusive.setDate(asOfExclusive.getDate() + 1);
+
+  const fourWeeksAgo = new Date(asOf);
   fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
 
-  const twelveWeeksAgo = startOfWeek(new Date());
-  twelveWeeksAgo.setDate(twelveWeeksAgo.getDate() - 7 * 11);
-
-  const rollingWindowStart = new Date();
+  const rollingWindowStart = new Date(asOf);
   rollingWindowStart.setDate(rollingWindowStart.getDate() - 70);
 
   const runWhere = {
@@ -404,20 +412,23 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 
   const [allRuns, recentRuns, chartRuns] = await Promise.all([
     prisma.externalActivity.findMany({
-      where: runWhere,
-      select: RUN_SELECT,
-    }),
-    prisma.externalActivity.findMany({
       where: {
         ...runWhere,
-        startTime: { gte: fourWeeksAgo },
+        startTime: { lt: asOfExclusive },
       },
       select: RUN_SELECT,
     }),
     prisma.externalActivity.findMany({
       where: {
         ...runWhere,
-        startTime: { gte: rollingWindowStart },
+        startTime: { gte: fourWeeksAgo, lt: asOfExclusive },
+      },
+      select: RUN_SELECT,
+    }),
+    prisma.externalActivity.findMany({
+      where: {
+        ...runWhere,
+        startTime: { gte: rollingWindowStart, lt: asOfExclusive },
       },
       select: RUN_SELECT,
       orderBy: { startTime: "desc" },
@@ -432,9 +443,13 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     athleteId,
     allTime: aggregateRuns(allRuns),
     last28: aggregateRuns(recentRuns),
-    weeklyTrend: buildWeeklyTrend(sortedChartRuns),
-    rolling28Trend: buildRollingTrend(sortedChartRuns),
-    longRunProgression: buildLongRunProgression(sortedChartRuns),
+    weeklyTrend: buildWeeklyTrend(sortedChartRuns, 12, asOf),
+    rolling28Trend: buildRollingTrend(sortedChartRuns, 42, asOf),
+    longRunProgression: buildLongRunProgression(sortedChartRuns, 12, asOf),
     recentRuns: summarizeRecentRuns(chartRuns),
   };
+}
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  return getDashboardStatsForDate(new Date());
 }

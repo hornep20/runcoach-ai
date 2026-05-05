@@ -1,12 +1,32 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type ChatTurn = { role: "user" | "assistant"; content: string };
 const MAX_MESSAGES = 24;
+const NEW_CHAT_FLAG_KEY = "runcoach.coach.newChatPending";
+
+function readNewChatPendingFlag(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(NEW_CHAT_FLAG_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeNewChatPendingFlag(pending: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (pending) {
+      window.localStorage.setItem(NEW_CHAT_FLAG_KEY, "1");
+    } else {
+      window.localStorage.removeItem(NEW_CHAT_FLAG_KEY);
+    }
+  } catch {}
+}
 
 export function CoachChat(props: {
-  trainingPlanId: string;
   coachingBrief: string;
   defaultBaseWeeks: number;
   defaultDistanceUnit: "mi" | "km";
@@ -14,7 +34,6 @@ export function CoachChat(props: {
   initialTurns: ChatTurn[];
 }) {
   const {
-    trainingPlanId,
     coachingBrief,
     defaultBaseWeeks,
     defaultDistanceUnit,
@@ -22,12 +41,20 @@ export function CoachChat(props: {
     initialTurns,
   } = props;
   const [input, setInput] = useState("");
-  const [turns, setTurns] = useState<ChatTurn[]>(initialTurns);
-  const [conversationId, setConversationId] = useState<string | null>(
-    initialConversationId,
-  );
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    const pending = readNewChatPendingFlag();
+    setConversationId(pending ? null : initialConversationId);
+    setTurns(pending ? [] : initialTurns);
+    setError(null);
+    setInput("");
+    setIsReady(true);
+  }, [initialConversationId, initialTurns]);
 
   const send = useCallback(async () => {
     const text = input.trim();
@@ -47,7 +74,6 @@ export function CoachChat(props: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: requestHistory,
-          trainingPlanId: trainingPlanId.trim() || undefined,
           coachingBrief,
           defaultBaseWeeks,
           defaultDistanceUnit,
@@ -70,6 +96,7 @@ export function CoachChat(props: {
       if (data.conversationId) {
         setConversationId(data.conversationId);
       }
+      writeNewChatPendingFlag(false);
       let reply = data.reply;
       if (data.workoutsCreated && data.workoutsCreated > 0) {
         reply += `\n\n_(Added ${data.workoutsCreated} planned workout(s) to your selected training plan.)_`;
@@ -89,7 +116,6 @@ export function CoachChat(props: {
     input,
     loading,
     turns,
-    trainingPlanId,
     coachingBrief,
     defaultBaseWeeks,
     defaultDistanceUnit,
@@ -99,7 +125,9 @@ export function CoachChat(props: {
   return (
     <div className="space-y-4">
       <div className="max-h-[420px] space-y-3 overflow-y-auto rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-        {turns.length === 0 ? (
+        {!isReady ? (
+          <p className="text-sm text-zinc-500">Loading conversation…</p>
+        ) : turns.length === 0 ? (
           <p className="text-sm text-zinc-500">
             Ask how to blend plans, adjust paces from your stats, or request next week&apos;s
             workouts on the calendar. Upload a PDF above so answers can reference it.
@@ -138,6 +166,7 @@ export function CoachChat(props: {
           className="rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
           disabled={loading}
           onClick={() => {
+            writeNewChatPendingFlag(true);
             setConversationId(null);
             setTurns([]);
             setError(null);

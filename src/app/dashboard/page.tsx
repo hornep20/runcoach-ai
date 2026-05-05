@@ -1,70 +1,95 @@
 import { formatMiles } from "@/lib/distance";
 import { getDashboardStats } from "@/lib/dashboard";
 import { calculateTrainingStatusScore } from "@/lib/fatigue";
-import { persistTrainingStatus, getTrainingStatusTrend } from "@/lib/trainingStatus";
+import {
+  backfillTrainingStatusHistory,
+  getDailyRunHoverStats,
+  getTrainingStatusTrend,
+  persistTrainingStatus,
+} from "@/lib/trainingStatus";
+import { TrainingStatusTrendCharts } from "./training-status-trend-charts";
 
-// keep all existing helper components unchanged above...
-
-function TrainingStatusTrendChart({ data }: { data: any[] }) {
-  if (!data.length) {
-    return <EmptyChart message="No historical fatigue data yet." />;
-  }
-
+function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl bg-zinc-50 p-4">
-      <div className="mb-4 flex flex-wrap gap-3 text-xs text-zinc-600">
-        <span className="inline-flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-red-500" /> Fatigue
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-emerald-500" /> Readiness
-        </span>
-      </div>
-
-      <div className="flex h-56 items-end gap-1">
-        {data.map((d) => (
-          <div key={d.date} className="flex min-w-0 flex-1 flex-col items-center gap-2">
-            <div className="flex h-44 w-full items-end justify-center gap-0.5">
-              <div
-                className="w-full max-w-2 rounded-t bg-red-500"
-                style={{ height: `${d.fatigueScore * 10}%` }}
-                title={`${d.label}: fatigue ${d.fatigueScore}/10`}
-              />
-              <div
-                className="w-full max-w-2 rounded-t bg-emerald-500"
-                style={{ height: `${d.readinessScore * 10}%` }}
-                title={`${d.label}: readiness ${d.readinessScore}/10`}
-              />
-            </div>
-            <span className="hidden truncate text-[10px] text-zinc-500 sm:block">{d.label}</span>
-          </div>
-        ))}
-      </div>
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="mt-1 text-lg font-semibold tabular-nums text-zinc-900">{value}</p>
     </div>
   );
 }
 
+function Panel({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <h2 className="text-lg font-semibold text-zinc-900">{title}</h2>
+      {description ? <p className="mt-1 text-sm text-zinc-600">{description}</p> : null}
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
 export default async function DashboardPage() {
+  await backfillTrainingStatusHistory();
   const stats = await getDashboardStats();
-
   await persistTrainingStatus(stats);
-
-  const trend = await getTrainingStatusTrend();
-
+  const trend = await getTrainingStatusTrend(10_000);
+  const firstDate = trend[0]?.date;
+  const lastDate = trend[trend.length - 1]?.date;
+  const runStatsByDate =
+    firstDate && lastDate
+      ? await getDailyRunHoverStats(firstDate, lastDate)
+      : {};
   const trainingStatus = calculateTrainingStatusScore(stats);
 
   return (
     <div className="space-y-6">
-      {/* keep existing header + stats + cards unchanged */}
+      <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <h1 className="text-2xl font-semibold tracking-tight">Running Dashboard</h1>
+        <p className="mt-2 text-zinc-600">Imported activity trends, load metrics, and fatigue/readiness signal.</p>
+      </section>
+
+      <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-zinc-900">Last 28 Days</h2>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Stat label="Runs" value={String(stats.last28.runCount)} />
+          <Stat label="Distance" value={formatMiles(stats.last28.distanceMi, 1)} />
+          <Stat label="Moving time" value={stats.last28.movingTimeLabel} />
+          <Stat label="Avg pace" value={stats.last28.pacePerMiLabel} />
+          <Stat label="Avg HR" value={stats.last28.avgHr} />
+          <Stat label="Training load" value={stats.last28.trainingLoad} />
+        </div>
+      </section>
+
+      <Panel
+        title="Training status"
+        description="Heuristic score from your recent mileage/load progression."
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Stat
+            label={`Fatigue (${trainingStatus.fatigue.level})`}
+            value={`${trainingStatus.fatigue.score.toFixed(1)} / 10`}
+          />
+          <Stat
+            label={`Readiness (${trainingStatus.readiness.level})`}
+            value={`${trainingStatus.readiness.score.toFixed(1)} / 10`}
+          />
+        </div>
+      </Panel>
 
       <Panel
         title="Fatigue and readiness trend"
-        description="Real historical scores based on your actual training load and mileage."
+        description="Historical daily status values."
       >
-        <TrainingStatusTrendChart data={trend} />
+        <TrainingStatusTrendCharts data={trend} runStatsByDate={runStatsByDate} />
       </Panel>
-
-      {/* rest of dashboard unchanged */}
     </div>
   );
 }

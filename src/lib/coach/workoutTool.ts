@@ -92,28 +92,6 @@ export async function executeCreatePlannedWorkoutsTool(
   rawArgs: unknown,
 ): Promise<CreateWorkoutsToolResult> {
   const errors: string[] = [];
-  if (!trainingPlanId) {
-    return {
-      ok: false,
-      created: 0,
-      skipped: 0,
-      errors: ["No training plan is selected in the UI. Ask the athlete to pick a plan before adding workouts."],
-    };
-  }
-
-  const plan = await prisma.trainingPlan.findFirst({
-    where: { id: trainingPlanId, athleteId },
-    select: { id: true },
-  });
-  if (!plan) {
-    return {
-      ok: false,
-      created: 0,
-      skipped: 0,
-      errors: ["Training plan not found for this athlete."],
-    };
-  }
-
   if (!rawArgs || typeof rawArgs !== "object") {
     return { ok: false, created: 0, skipped: 0, errors: ["Invalid tool arguments"] };
   }
@@ -128,6 +106,48 @@ export async function executeCreatePlannedWorkoutsTool(
       skipped: 0,
       errors: ["Too many workouts in one call (max 21). Split across multiple tool calls."],
     };
+  }
+
+  let effectiveTrainingPlanId = trainingPlanId;
+  if (effectiveTrainingPlanId) {
+    const plan = await prisma.trainingPlan.findFirst({
+      where: { id: effectiveTrainingPlanId, athleteId },
+      select: { id: true },
+    });
+    if (!plan) {
+      return {
+        ok: false,
+        created: 0,
+        skipped: 0,
+        errors: ["Training plan not found for this athlete."],
+      };
+    }
+  } else {
+    const parsedDates = workouts
+      .map((w) => {
+        if (!w || typeof w !== "object") return null;
+        const d = (w as Record<string, unknown>).date;
+        return typeof d === "string" ? parseYmdUtcNoon(d) : null;
+      })
+      .filter((d): d is Date => d instanceof Date)
+      .sort((a, b) => a.getTime() - b.getTime());
+    const startDate = parsedDates[0] ?? new Date();
+    const endDate = parsedDates[parsedDates.length - 1] ?? startDate;
+    const createdPlan = await prisma.trainingPlan.create({
+      data: {
+        athleteId,
+        name: `AI Coach Calendar Plan (${startDate.toISOString().slice(0, 10)})`,
+        type: PlanType.MARATHON_16_WEEK,
+        startDate,
+        endDate,
+      },
+      select: { id: true },
+    });
+    effectiveTrainingPlanId = createdPlan.id;
+    errors.push("No plan selected, so the coach auto-created a new calendar plan.");
+  }
+  if (!effectiveTrainingPlanId) {
+    return { ok: false, created: 0, skipped: 0, errors: ["Could not resolve target training plan."] };
   }
 
   let created = 0;
@@ -161,7 +181,7 @@ export async function executeCreatePlannedWorkoutsTool(
     try {
       await prisma.workout.create({
         data: {
-          trainingPlanId,
+          trainingPlanId: effectiveTrainingPlanId,
           date,
           title: title.slice(0, 200),
           type: typeStr,
@@ -345,7 +365,8 @@ export const CREATE_PLANNED_WORKOUTS_TOOL = {
   function: {
     name: "create_planned_workouts",
     description:
-      "Create future planned workouts on the athlete's calendar for the training plan they selected in the app. " +
+      "Create future planned workouts on the athlete's calendar. " +
+      "If no target plan is provided, a new draft plan is auto-created and workouts are written there. " +
       "Only call after the athlete agrees or asks you to add workouts. Use WorkoutType enum values exactly. " +
       "Dates must be YYYY-MM-DD (UTC calendar day; stored at noon UTC). Prefer a small batch (e.g. one week).",
     parameters: {

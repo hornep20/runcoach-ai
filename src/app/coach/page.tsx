@@ -1,14 +1,13 @@
 import { resolveAthleteIdForRead } from "@/lib/athleteRead";
 import { prisma } from "@/lib/prisma";
 
-import { CoachShell, type CoachTurn, type TrainingPlanOption } from "./coach-shell";
+import { CoachShell, type CoachTurn } from "./coach-shell";
 
 export const dynamic = "force-dynamic";
 
 export default async function CoachPage() {
   const athleteId = await resolveAthleteIdForRead();
 
-  let plans: TrainingPlanOption[] = [];
   let initialCoachingBrief = "";
   let initialConversationId: string | null = null;
   let initialTurns: CoachTurn[] = [];
@@ -16,18 +15,7 @@ export default async function CoachPage() {
   let initialDefaultDistanceUnit: "mi" | "km" = "mi";
 
   if (athleteId) {
-    const [planRows, athlete, latestConversation] = await Promise.all([
-      prisma.trainingPlan.findMany({
-        where: { athleteId },
-        orderBy: { startDate: "desc" },
-        select: {
-          id: true,
-          name: true,
-          type: true,
-          startDate: true,
-          endDate: true,
-        },
-      }),
+    const [athlete, latestConversation] = await Promise.all([
       prisma.athlete.findUnique({
         where: { id: athleteId },
         select: {
@@ -47,14 +35,6 @@ export default async function CoachPage() {
         },
       }),
     ]);
-
-    plans = planRows.map((p) => ({
-      id: p.id,
-      name: p.name,
-      type: p.type,
-      startDate: p.startDate.toISOString(),
-      endDate: p.endDate.toISOString(),
-    }));
     initialCoachingBrief = athlete?.coachingBrief ?? "";
     initialDefaultBaseWeeks = athlete?.defaultBaseWeeks ?? 8;
     initialDefaultDistanceUnit =
@@ -78,7 +58,6 @@ export default async function CoachPage() {
         can create planned workouts on the selected plan when you confirm.
       </p>
       <CoachShell
-        plans={plans}
         initialCoachingBrief={initialCoachingBrief}
         initialDefaultBaseWeeks={initialDefaultBaseWeeks}
         initialDefaultDistanceUnit={initialDefaultDistanceUnit}
