@@ -1,4 +1,7 @@
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+
 import { getDashboardStats } from "@/lib/dashboard";
+import { chatCompletionJson } from "@/lib/coach/openai";
 
 export type CoachAgentMode =
   | "training_analysis"
@@ -9,11 +12,39 @@ export type CoachAgentMode =
   | "race_strategy"
   | "general_coach";
 
+const COACH_AGENT_MODES: CoachAgentMode[] = [
+  "training_analysis",
+  "plan_builder",
+  "plan_adjustment",
+  "recovery_risk",
+  "strength_mobility",
+  "race_strategy",
+  "general_coach",
+];
+
+type CoachAgentClassification = {
+  mode: CoachAgentMode;
+  confidence: number;
+  reason: string;
+  source: "llm" | "fallback";
+};
+
+function isCoachAgentMode(value: unknown): value is CoachAgentMode {
+  return typeof value === "string" && COACH_AGENT_MODES.includes(value as CoachAgentMode);
+}
+
+function clampConfidence(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 0.5;
+  }
+  return Math.min(1, Math.max(0, value));
+}
+
 function includesAny(text: string, terms: string[]): boolean {
   return terms.some((term) => text.includes(term));
 }
 
-function classifyCoachAgentMode(message: string): CoachAgentMode {
+function classifyCoachAgentModeFallback(message: string): CoachAgentClassification {
   const text = message.toLowerCase();
 
   if (
@@ -31,7 +62,12 @@ function classifyCoachAgentMode(message: string): CoachAgentMode {
       "should i rest",
     ])
   ) {
-    return "recovery_risk";
+    return {
+      mode: "recovery_risk",
+      confidence: 0.82,
+      reason: "Detected recovery, fatigue, pain, or injury language.",
+      source: "fallback",
+    };
   }
 
   if (
@@ -46,7 +82,12 @@ function classifyCoachAgentMode(message: string): CoachAgentMode {
       "make up",
     ])
   ) {
-    return "plan_adjustment";
+    return {
+      mode: "plan_adjustment",
+      confidence: 0.82,
+      reason: "Detected missed workout, rescheduling, or plan-adjustment language.",
+      source: "fallback",
+    };
   }
 
   if (
@@ -62,7 +103,12 @@ function classifyCoachAgentMode(message: string): CoachAgentMode {
       "16-week",
     ])
   ) {
-    return "plan_builder";
+    return {
+      mode: "plan_builder",
+      confidence: 0.82,
+      reason: "Detected request to build or generate a training plan.",
+      source: "fallback",
+    };
   }
 
   if (
@@ -77,7 +123,12 @@ function classifyCoachAgentMode(message: string): CoachAgentMode {
       "prehab",
     ])
   ) {
-    return "strength_mobility";
+    return {
+      mode: "strength_mobility",
+      confidence: 0.78,
+      reason: "Detected strength, mobility, lifting, or prehab language.",
+      source: "fallback",
+    };
   }
 
   if (
@@ -93,7 +144,12 @@ function classifyCoachAgentMode(message: string): CoachAgentMode {
       "taper",
     ])
   ) {
-    return "race_strategy";
+    return {
+      mode: "race_strategy",
+      confidence: 0.78,
+      reason: "Detected race execution, fueling, taper, or pacing language.",
+      source: "fallback",
+    };
   }
 
   if (
@@ -110,10 +166,73 @@ function classifyCoachAgentMode(message: string): CoachAgentMode {
       "readiness",
     ])
   ) {
-    return "training_analysis";
+    return {
+      mode: "training_analysis",
+      confidence: 0.78,
+      reason: "Detected request to analyze training data or dashboard trends.",
+      source: "fallback",
+    };
   }
 
-  return "general_coach";
+  return {
+    mode: "general_coach",
+    confidence: 0.55,
+    reason: "No specialized mode clearly matched; using general coaching behavior.",
+    source: "fallback",
+  };
+}
+
+async function classifyCoachAgentModeWithLlm(
+  message: string,
+): Promise<CoachAgentClassification> {
+  const fallback = classifyCoachAgentModeFallback(message);
+  const messages: ChatCompletionMessageParam[] = [
+    {
+      role: "system",
+      content: `Classify the user's running coach request into exactly one agent mode.
+
+Return strict JSON only with this schema:
+{"mode":"training_analysis|plan_builder|plan_adjustment|recovery_risk|strength_mobility|race_strategy|general_coach","confidence":0.0,"reason":"brief reason"}
+
+Mode definitions:
+- training_analysis: analyze dashboard data, trends, readiness, fitness, mileage, load, long-run progression, or recent runs.
+- plan_builder: create or design a new base-building, marathon, or training plan.
+- plan_adjustment: adjust, reschedule, recover from, or modify an existing plan or missed workouts.
+- recovery_risk: fatigue, soreness, pain, injury, rest, overtraining, or whether to back off.
+- strength_mobility: lifting, strength, mobility, core, prehab, supplemental workouts.
+- race_strategy: pacing, fueling, taper, race execution, goal time, marathon strategy.
+- general_coach: simple questions or requests that do not require a specialized mode.
+
+Prefer recovery_risk when there is pain, injury, or fatigue. Prefer plan_adjustment when the user missed workouts or asks what to change. Prefer training_analysis when they ask how they are doing or if they are on track.`,
+    },
+    {
+      role: "user",
+      content: message.slice(0, 2000),
+    },
+  ];
+
+  try {
+    const raw = await chatCompletionJson(messages);
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const mode = parsed.mode;
+    if (!isCoachAgentMode(mode)) {
+      return fallback;
+    }
+    const reason =
+      typeof parsed.reason === "string" && parsed.reason.trim().length > 0
+        ? parsed.reason.trim().slice(0, 240)
+        : fallback.reason;
+    const confidence = clampConfidence(parsed.confidence);
+
+    return {
+      mode,
+      confidence,
+      reason,
+      source: "llm",
+    };
+  } catch {
+    return fallback;
+  }
 }
 
 function formatAgentName(mode: CoachAgentMode): string {
@@ -226,16 +345,18 @@ function buildRiskFlags(stats: Awaited<ReturnType<typeof getDashboardStats>>): s
 }
 
 export async function buildCoachAgentDirective(userMessage: string): Promise<string> {
-  const mode = classifyCoachAgentMode(userMessage);
+  const classification = await classifyCoachAgentModeWithLlm(userMessage);
   const stats = await getDashboardStats();
   const flags = buildRiskFlags(stats);
 
   return [
     "## Active coach agent",
-    `Mode: ${formatAgentName(mode)} (${mode})`,
+    `Mode: ${formatAgentName(classification.mode)} (${classification.mode})`,
+    `Classifier: ${classification.source} · confidence ${classification.confidence.toFixed(2)}`,
+    `Classifier reason: ${classification.reason}`,
     "",
     "Agent priorities:",
-    ...modeInstructions(mode).map((instruction) => `- ${instruction}`),
+    ...modeInstructions(classification.mode).map((instruction) => `- ${instruction}`),
     "",
     "Current risk flags from dashboard data:",
     ...(flags.length > 0 ? flags.map((flag) => `- ${flag}`) : ["- No major dashboard risk flags detected from available data."]),
