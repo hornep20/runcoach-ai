@@ -1,5 +1,6 @@
 import { formatMiles } from "@/lib/distance";
 import { getDashboardStats } from "@/lib/dashboard";
+import { calculateTrainingStatusScore } from "@/lib/fatigue";
 
 function Stat({
   label,
@@ -15,6 +16,41 @@ function Stat({
       <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</p>
       <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900">{value}</p>
       {helper ? <p className="mt-1 text-xs text-zinc-500">{helper}</p> : null}
+    </div>
+  );
+}
+
+function ScoreCard({
+  label,
+  score,
+  level,
+  summary,
+}: {
+  label: string;
+  score: number;
+  level: string;
+  summary: string;
+}) {
+  const pct = Math.max(0, Math.min(100, score * 10));
+
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</p>
+          <p className="mt-1 text-3xl font-semibold tabular-nums text-zinc-900">
+            {score.toFixed(1)}
+            <span className="text-base font-medium text-zinc-400">/10</span>
+          </p>
+        </div>
+        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-medium capitalize text-zinc-700">
+          {level}
+        </span>
+      </div>
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-100">
+        <div className="h-full rounded-full bg-zinc-900" style={{ width: `${pct}%` }} />
+      </div>
+      <p className="mt-3 text-sm leading-5 text-zinc-600">{summary}</p>
     </div>
   );
 }
@@ -174,6 +210,7 @@ function LongRunProgression({
 
 export default async function DashboardPage() {
   const stats = await getDashboardStats();
+  const trainingStatus = calculateTrainingStatusScore(stats);
 
   return (
     <div className="space-y-6">
@@ -207,6 +244,40 @@ export default async function DashboardPage() {
             <Stat label="Avg pace" value={stats.last28.pacePerMiLabel} helper="Moving time / distance" />
             <Stat label="Training load" value={stats.last28.trainingLoad} helper="Last 28 days" />
           </section>
+
+          <section className="grid gap-6 lg:grid-cols-2">
+            <ScoreCard
+              label="Fatigue"
+              score={trainingStatus.fatigue.score}
+              level={trainingStatus.fatigue.level}
+              summary={trainingStatus.fatigue.summary}
+            />
+            <ScoreCard
+              label="Readiness"
+              score={trainingStatus.readiness.score}
+              level={trainingStatus.readiness.level}
+              summary={trainingStatus.readiness.summary}
+            />
+          </section>
+
+          <Panel
+            title="Fatigue drivers"
+            description="Explainable factors used by the coach to decide whether to build, hold, or back off."
+          >
+            <div className="grid gap-3 md:grid-cols-2">
+              {trainingStatus.fatigue.factors.map((factor) => (
+                <div key={`${factor.label}-${factor.detail}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <h3 className="font-medium text-zinc-900">{factor.label}</h3>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs font-medium tabular-nums text-zinc-600 ring-1 ring-zinc-200">
+                      +{factor.points}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm leading-5 text-zinc-600">{factor.detail}</p>
+                </div>
+              ))}
+            </div>
+          </Panel>
 
           <section className="grid gap-6 xl:grid-cols-2">
             <Panel
